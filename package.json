@@ -1,0 +1,13 @@
+{
+  "name": "openclaw-layered-history-index",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Layered conversation memory plugin for OpenClaw",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

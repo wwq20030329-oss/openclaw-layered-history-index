@@ -88,6 +88,16 @@ Example:
 - It does not include user config, auth profiles, agent state, or conversation data.
 - The plugin reads the local agent's runtime/model config on the target machine.
 
+## Development
+
+Run tests locally:
+
+```bash
+npm test
+```
+
+CI runs the same test suite on pushes and pull requests.
+
 ## License
 
 MIT
