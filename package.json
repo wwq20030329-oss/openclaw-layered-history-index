@@ -5,7 +5,8 @@
   "description": "Layered conversation memory plugin for OpenClaw",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "analyze:trace": "node scripts/analyze-route-trace.cjs"
   },
   "engines": {
     "node": ">=20"

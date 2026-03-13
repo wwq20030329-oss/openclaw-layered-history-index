@@ -95,6 +95,7 @@ Example:
 - It does not include user config, auth profiles, agent state, or conversation data.
 - The plugin reads the local agent's runtime/model config on the target machine.
 - `route-trace.jsonl` is capped and append-only so you can inspect why a prompt loaded `L0`, `L1`, or `L2`.
+- Each route trace entry now includes estimated `actual`, `baseline`, and `saved` token counts.
 
 ## Development
 
@@ -105,6 +106,14 @@ npm test
 ```
 
 CI runs the same test suite on pushes and pull requests.
+
+Analyze token savings from a route trace:
+
+```bash
+npm run analyze:trace -- ~/.openclaw/agents/main/agent/history/route-trace.jsonl
+```
+
+You can also point it at a directory and it will scan recursively for `route-trace.jsonl`.
 
 For OpenClaw version upgrades, use the compatibility checklist in [docs/UPGRADE_CHECKLIST.md](/Users/wwq/openclaw-layered-history-index/docs/UPGRADE_CHECKLIST.md).
 

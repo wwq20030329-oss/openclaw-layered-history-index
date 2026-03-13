@@ -1004,6 +1004,69 @@ function scoreTextMatch(text, keywords) {
   return score;
 }
 
+function estimateTokenCount(text) {
+  const source = String(text || "").trim();
+  if (!source) {
+    return 0;
+  }
+
+  let tokens = 0;
+  const cjkMatches = source.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu) || [];
+  tokens += cjkMatches.length;
+
+  const nonCjk = source.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu, " ");
+  const chunks = nonCjk.match(/[A-Za-z0-9_./:-]+|[^\s]/g) || [];
+  for (const chunk of chunks) {
+    if (/^[A-Za-z0-9_./:-]+$/.test(chunk)) {
+      tokens += Math.max(1, Math.ceil(chunk.length / 4));
+      continue;
+    }
+    tokens += 1;
+  }
+  return tokens;
+}
+
+function measurePromptText(text) {
+  const value = String(text || "");
+  return {
+    chars: value.length,
+    tokens: estimateTokenCount(value),
+  };
+}
+
+function summarizePromptLayers(layers) {
+  const l0 = measurePromptText(layers?.l0);
+  const l1 = measurePromptText(layers?.l1);
+  const l2 = measurePromptText(layers?.l2);
+  return {
+    l0,
+    l1,
+    l2,
+    total: {
+      chars: l0.chars + l1.chars + l2.chars,
+      tokens: l0.tokens + l1.tokens + l2.tokens,
+    },
+  };
+}
+
+function buildTraceMetrics(actualLayers, baselineLayers) {
+  const actual = summarizePromptLayers(actualLayers);
+  const baseline = summarizePromptLayers(baselineLayers);
+  const savedTokens = Math.max(0, baseline.total.tokens - actual.total.tokens);
+  const savedChars = Math.max(0, baseline.total.chars - actual.total.chars);
+  const savedPercent =
+    baseline.total.tokens > 0 ? Number(((savedTokens / baseline.total.tokens) * 100).toFixed(1)) : 0;
+  return {
+    actual,
+    baseline,
+    saved: {
+      chars: savedChars,
+      tokens: savedTokens,
+      percent: savedPercent,
+    },
+  };
+}
+
 function isValidMonthDay(month, day) {
   return month >= 1 && month <= 12 && day >= 1 && day <= 31;
 }
@@ -1395,6 +1458,15 @@ function buildTargetedSessionTranscript(rawText, promptText, options, params = {
     : renderSessionMessages(fallbackMessages);
 }
 
+function buildTailSessionTranscript(rawText, options) {
+  const messages = parseSessionTranscript(rawText, options);
+  if (messages.length === 0) {
+    return "";
+  }
+  const maxMessages = Math.max(1, options.l2MaxMessagesPerSession || DEFAULT_CONFIG.l2MaxMessagesPerSession);
+  return renderSessionMessages(messages.slice(-maxMessages));
+}
+
 async function resolveSessionFilePath(sessionsDir, sessionId) {
   const direct = path.join(sessionsDir, `${sessionId}.jsonl`);
   if (fs.existsSync(direct)) {
@@ -1446,6 +1518,43 @@ async function loadL2(agentDir, sessionIds, promptText, options, params = {}) {
   return {
     available: true,
     prompt: `<full_conversation>\n以下是按问题缩窄后的相关历史对话片段：\n${chunks.join("\n\n---\n\n")}\n</full_conversation>`,
+  };
+}
+
+async function loadBaselineL2(agentDir, sessionIds, options) {
+  const sessionsDir = resolveSessionsDir(agentDir);
+  const targetIds = Array.isArray(sessionIds) ? sessionIds.filter(Boolean).slice(0, options.l2MaxSessions) : [];
+  if (targetIds.length === 0) {
+    return { available: false, prompt: "" };
+  }
+  const chunks = [];
+  let usedChars = 0;
+
+  for (const sessionId of targetIds) {
+    if (usedChars >= options.l2PromptChars) {
+      break;
+    }
+    const filePath = await resolveSessionFilePath(sessionsDir, sessionId);
+    if (!filePath) {
+      continue;
+    }
+    const raw = await safeReadText(filePath);
+    const text = buildTailSessionTranscript(raw, options);
+    if (!text) {
+      continue;
+    }
+    const remaining = options.l2PromptChars - usedChars;
+    const clipped = text.length > remaining ? `${text.slice(0, remaining)}\n...(truncated)` : text;
+    chunks.push(`### Session ${sessionId}\n${clipped}`);
+    usedChars += clipped.length;
+  }
+
+  if (chunks.length === 0) {
+    return { available: false, prompt: "" };
+  }
+  return {
+    available: true,
+    prompt: `<full_conversation>\n以下是未缩窄前的完整历史对话片段：\n${chunks.join("\n\n---\n\n")}\n</full_conversation>`,
   };
 }
 
@@ -1571,6 +1680,11 @@ async function buildPromptContext(api, options, event, ctx) {
     ? Boolean(routeDecision.loadL1 || routeDecision.loadL2 || plan.explicitTsids.length > 0)
     : true;
   const shouldLoadL2 = routeDecision ? Boolean(routeDecision.loadL2 || plan.strongRecall) : plan.strongRecall;
+  const layerPrompts = {
+    l0: (options.alwaysLoadL0 || plan.recall) && l0Result.prompt ? l0Result.prompt : "",
+    l1: "",
+    l2: "",
+  };
   let l1Result = { available: false, prompt: "", tsids: [] };
   if (shouldLoadL1) {
     l1Result = await loadL1(
@@ -1585,21 +1699,47 @@ async function buildPromptContext(api, options, event, ctx) {
     );
     if (l1Result.available) {
       segments.push(l1Result.prompt);
+      layerPrompts.l1 = l1Result.prompt;
     }
   }
 
+  let l2Result = { available: false, prompt: "" };
   if (shouldLoadL2) {
     const l2Tsids = l1Result.tsids && l1Result.tsids.length > 0 ? l1Result.tsids : scopedTsids;
     const sessionIds = resolveSessionIdsFromTsids(l2Tsids, l0Result.tsidMap);
-    const l2Result = await loadL2(agentDir, sessionIds, plan.normalizedPrompt || promptText, options, {
+    l2Result = await loadL2(agentDir, sessionIds, plan.normalizedPrompt || promptText, options, {
       strongRecall: plan.strongRecall,
     });
     if (l2Result.available) {
       segments.push(l2Result.prompt);
+      layerPrompts.l2 = l2Result.prompt;
     }
   }
 
   if (options.persistRouteTrace && plan.recall) {
+    const baselineL1 = await loadL1(
+      agentDir,
+      {
+        dates: plan.dates,
+        tsids: plan.tsids,
+        scoreTsids: plan.explicitTsids,
+        promptText: plan.normalizedPrompt || promptText,
+      },
+      options,
+    );
+    const baselineNeedsL2 = Boolean(routeDecision?.loadL2 || plan.strongRecall);
+    let baselineL2 = { available: false, prompt: "" };
+    if (baselineNeedsL2) {
+      const baselineL2Tsids =
+        baselineL1.tsids && baselineL1.tsids.length > 0 ? baselineL1.tsids : plan.tsids;
+      const baselineSessionIds = resolveSessionIdsFromTsids(baselineL2Tsids, l0Result.tsidMap);
+      baselineL2 = await loadBaselineL2(agentDir, baselineSessionIds, options);
+    }
+    const metrics = buildTraceMetrics(layerPrompts, {
+      l0: layerPrompts.l0,
+      l1: baselineL1.available ? baselineL1.prompt : "",
+      l2: baselineL2.available ? baselineL2.prompt : "",
+    });
     await enqueueWrite(agentDir, async () => {
       await ensureHistoryDir(agentDir);
       await appendRouteTrace(
@@ -1629,6 +1769,7 @@ async function buildPromptContext(api, options, event, ctx) {
             loadedL1: segments.some((segment) => segment.includes("<key_decisions>")),
             loadedL2: segments.some((segment) => segment.includes("<full_conversation>")),
           },
+          metrics,
         },
         options,
       );

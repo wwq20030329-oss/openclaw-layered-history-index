@@ -469,6 +469,12 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
   assert.equal(routeEntries[1].resolved.loadedL1, true);
   assert.equal(routeEntries[1].resolved.loadedL2, false);
   assert.equal(routeEntries[2].resolved.loadedL2, true);
+  assert.ok(routeEntries[1].metrics.actual.total.tokens > 0);
+  assert.ok(routeEntries[1].metrics.baseline.total.tokens >= routeEntries[1].metrics.actual.total.tokens);
+  assert.ok(routeEntries[1].metrics.saved.tokens > 0);
+  assert.ok(routeEntries[2].metrics.actual.l2.tokens > 0);
+  assert.ok(routeEntries[2].metrics.baseline.l2.tokens > routeEntries[2].metrics.actual.l2.tokens);
+  assert.ok(routeEntries[2].metrics.saved.percent > 0);
 
   await fsp.rm(stateDir, { recursive: true, force: true });
   delete process.env.__TEST_STATE_DIR__;
