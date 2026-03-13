@@ -2,7 +2,7 @@
   "id": "layered-history-index",
   "name": "Layered History Index",
   "description": "Layered L0/L1/L2 conversation indexing inspired by OpenViking.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
