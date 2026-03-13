@@ -68,6 +68,86 @@ const DEFAULT_CONFIG = {
   ],
 };
 
+// ========================
+// Viking 风格路由模型调用
+// ========================
+async function callRoutingModel(api, options, userMessage, timeline) {
+  const routeModel = options.routeModel || "";
+  if (!routeModel) {
+    return null;
+  }
+
+  const packIndex = Object.entries(TOOL_PACKS)
+    .map(([name, pack]) => `  - ${name}: ${pack.description}`)
+    .join("\n");
+
+  const fileIndex = Object.entries(FILE_DESCRIPTIONS)
+    .map(([name, desc]) => `  - ${name}: ${desc}`)
+    .join("\n");
+
+  const timelineSection = timeline
+    ? `===== Conversation Timeline (L0) =====\n${timeline}\n\n`
+    : "";
+
+  const systemPrompt = `You are a resource router. Select capability packs and files needed for the task. Reply with ONLY a JSON object, no other text, no markdown.`;
+
+  const userPrompt = `User message: "${userMessage}"
+
+${timelineSection}===== Capability Packs (select needed) =====
+Always loaded: read + exec (do not select)
+${packIndex}
+
+===== Workspace Files (select needed) =====
+${fileIndex}
+
+Reply JSON:
+{"packs":["pack names"],"files":["file names"],"needsL1":false,"l1Dates":[],"needsL2":false,"reason":"brief reason"}
+
+Rules:
+1. For ANY conversation: include SOUL.md, IDENTITY.md, USER.md.
+2. File editing/coding: include "base-ext".
+3. Web search: include "web".
+4. Send messages/notifications: include "message".
+5. Scheduled tasks/reminders: include "infra".
+6. Simple chat: packs=[], files=["SOUL.md","IDENTITY.md","USER.md"].
+7. When unsure: include more packs (cheap).
+8. If the user references previous work shown in the Timeline, set needsL1: true and l1Dates to the relevant dates from the Timeline (format: "YYYY-MM-DD").
+9. If the user needs the exact original conversation or full code, set needsL2: true.
+10. If no Timeline is provided or unrelated to past work, set needsL1: false, l1Dates: [], needsL2: false.`;
+
+  try {
+    const response = await api.ai.call(
+      { provider: "minimax-portal", model: { id: routeModel } },
+      {
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 200,
+        temperature: 0,
+      }
+    );
+
+    const content = response?.content?.[0]?.text || "";
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return null;
+    }
+
+    const result = JSON.parse(jsonMatch[0]);
+    return {
+      packs: Array.isArray(result.packs) ? result.packs : [],
+      files: Array.isArray(result.files) ? result.files : ["SOUL.md", "IDENTITY.md", "USER.md"],
+      needsL1: Boolean(result.needsL1),
+      l1Dates: Array.isArray(result.l1Dates) ? result.l1Dates : [],
+      needsL2: Boolean(result.needsL2),
+      reason: result.reason || "",
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 const writeQueues = new Map();
 
 function mergeConfig(pluginConfig) {
@@ -1653,10 +1733,13 @@ async function buildPromptContext(api, options, event, ctx) {
   }
 
   const promptText = typeof event?.prompt === "string" ? event.prompt : "";
-  const plan = buildRecallPlan(promptText, l0Result, options);
-  const routeDecision = plan.recall
-    ? await routeRecallLayers(api, api.config, ctx, options, plan.normalizedPrompt || promptText, l0Result, plan)
+  
+  // Viking 风格路由模型调用
+  const routeDecision = options.routeModel
+    ? await callRoutingModel(api, options, promptText, l0Result.prompt || "")
     : null;
+  
+  const plan = buildRecallPlan(promptText, l0Result, options);
   const segments = [];
   const recallDates =
     routeDecision && Array.isArray(routeDecision.l1Dates) && routeDecision.l1Dates.length > 0
