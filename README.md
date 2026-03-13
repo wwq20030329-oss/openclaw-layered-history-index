@@ -72,6 +72,7 @@ openclaw plugins install -l .
           "recentTsidsForRecall": 2,
           "persistRouteTrace": true,
           "routeTraceMaxEntries": 200,
+          "routeModel": "LongCat-Flash-Lite",
           "autoCleanup": true,
           "maxHistoryDays": 30
         }
