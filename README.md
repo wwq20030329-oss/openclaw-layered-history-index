@@ -105,6 +105,8 @@ npm test
 
 CI runs the same test suite on pushes and pull requests.
 
+For OpenClaw version upgrades, use the compatibility checklist in [docs/UPGRADE_CHECKLIST.md](/Users/wwq/openclaw-layered-history-index/docs/UPGRADE_CHECKLIST.md).
+
 ## License
 
 MIT
