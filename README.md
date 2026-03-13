@@ -133,6 +133,10 @@ npm run analyze:trace -- ./history/route-trace.jsonl
 
 ## 更新日志
 
+### v0.1.2
+- 添加 `routeModel` 配置支持独立路由模型（如 LongCat-Flash-Lite）
+- 优化配置默认值
+
 ### v0.1.1
 - 添加 `openclaw.extensions` 字段，修复安装警告
 - 添加 `autoCleanup` 和 `maxHistoryDays` 自动清理功能
