@@ -8,6 +8,8 @@ It adds:
 - `L1` decisions/config/command recall
 - `L2` full conversation recall
 - lightweight routing so vague recall uses less context than full replay
+- date-scoped `L1` routing to keep decision recall tighter
+- optional route trace logging for debugging and tuning
 
 ## Features
 
@@ -17,6 +19,7 @@ It adds:
 - Uses `L0` for vague recall
 - Uses `L0 + L1` for facts like paths, commands, ports, config, URLs
 - Uses `L0 + L1 + L2` for full transcript recall
+- Lets the route model pick specific `L1` dates from the timeline before loading decisions
 - Handles current OpenClaw runtime quirks such as missing runtime auth and timestamp/IP false positives
 
 ## Files Written
@@ -26,6 +29,7 @@ For each agent, the plugin writes:
 - `history/timeline.md`
 - `history/decisions.md`
 - `history/tsid-session-map.json`
+- `history/route-trace.jsonl` when route tracing is enabled
 
 ## Install
 
@@ -73,6 +77,8 @@ Example:
           "l2MaxSessions": 1,
           "recentDaysForRecall": 2,
           "recentTsidsForRecall": 2,
+          "persistRouteTrace": true,
+          "routeTraceMaxEntries": 200,
           "routeTimelineEntries": 4,
           "routeMaxTokens": 120
         }
@@ -87,6 +93,7 @@ Example:
 - This repo ships only the plugin source and manifest.
 - It does not include user config, auth profiles, agent state, or conversation data.
 - The plugin reads the local agent's runtime/model config on the target machine.
+- `route-trace.jsonl` is capped and append-only so you can inspect why a prompt loaded `L0`, `L1`, or `L2`.
 
 ## Development
 

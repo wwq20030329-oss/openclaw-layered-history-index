@@ -272,8 +272,8 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
     routeModels.push(body.model);
     const prompt = String(body.messages?.[0]?.content || "");
     const responseText = prompt.includes("把上次 nginx 那次完整对话调出来")
-      ? '{"loadL1":true,"loadL2":true,"reason":"full replay"}'
-      : '{"loadL1":true,"loadL2":false,"reason":"fact lookup"}';
+      ? '{"loadL1":true,"loadL2":true,"reason":"full replay","l1Dates":["2026-03-13"]}'
+      : '{"loadL1":true,"loadL2":false,"reason":"fact lookup","l1Dates":["2026-03-13"]}';
     return new Response(
       JSON.stringify({
         content: [{ type: "text", text: responseText }],
@@ -283,8 +283,17 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
   });
   await setupAgentState(stateDir, agentId, {
     timeline:
-      "- 20260313070101 | OpenClaw Web部署配置整理\n- 20260313070109 | Nginx反代与证书配置确认\n",
+      [
+        "- 20260312070101 | Docker 构建缓存排查",
+        "- 20260313070101 | OpenClaw Web部署配置整理",
+        "- 20260313070109 | Nginx反代与证书配置确认",
+        "",
+      ].join("\n"),
     decisions: [
+      "## 2026-03-12",
+      "",
+      "- [20260312070101] Docker命令: docker build -t openclaw:test .",
+      "",
       "## 2026-03-13",
       "",
       "- [20260313070101] 部署目录: /srv/openclaw/app",
@@ -294,6 +303,7 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
       "",
     ].join("\n"),
     tsidMap: {
+      "20260312070101": "sess-b",
       "20260313070101": "sess-a",
       "20260313070109": "sess-a",
     },
@@ -319,6 +329,20 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
               {
                 type: "text",
                 text: "已记录：部署目录 /srv/openclaw/app，重启命令 pm2 restart openclaw-web，Nginx 端口 8317，配置文件 /etc/nginx/conf.d/openclaw.conf。",
+              },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "sess-b": [
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "[Thu 2026-03-12 07:01 GMT+8] docker build 那次先这样。",
               },
             ],
           },
@@ -361,6 +385,15 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
     { prompt: "[Fri 2026-03-13 07:08 GMT+8] 把上次 nginx 那次完整对话调出来，我要确认端口和配置文件。" },
     { agentId, sessionId: "sess-full", sessionKey: `agent:${agentId}:main` },
   );
+  const routeTrace = await fsp.readFile(
+    path.join(stateDir, "agents", agentId, "agent", "history", "route-trace.jsonl"),
+    "utf8",
+  );
+  const routeEntries = routeTrace
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 
   assert.match(vague.prependContext, /<conversation_timeline>/);
   assert.doesNotMatch(vague.prependContext, /<key_decisions>/);
@@ -369,12 +402,20 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
   assert.match(facts.prependContext, /<conversation_timeline>/);
   assert.match(facts.prependContext, /<key_decisions>/);
   assert.doesNotMatch(facts.prependContext, /<full_conversation>/);
+  assert.match(facts.prependContext, /部署目录: \/srv\/openclaw\/app/);
+  assert.match(facts.prependContext, /Nginx端口: 8317/);
+  assert.doesNotMatch(facts.prependContext, /docker build -t openclaw:test/);
 
   assert.match(full.prependContext, /<conversation_timeline>/);
   assert.match(full.prependContext, /<key_decisions>/);
   assert.match(full.prependContext, /<full_conversation>/);
 
   assert.ok(routeModels.every((entry) => entry === "MiniMax-M2.5-highspeed"));
+  assert.equal(routeEntries.length, 3);
+  assert.deepEqual(routeEntries[1].route.l1Dates, ["2026-03-13"]);
+  assert.equal(routeEntries[1].resolved.loadedL1, true);
+  assert.equal(routeEntries[1].resolved.loadedL2, false);
+  assert.equal(routeEntries[2].resolved.loadedL2, true);
 
   await fsp.rm(stateDir, { recursive: true, force: true });
   delete process.env.__TEST_STATE_DIR__;

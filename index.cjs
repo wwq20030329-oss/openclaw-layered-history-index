@@ -8,6 +8,7 @@ const HISTORY_DIR = "history";
 const TIMELINE_FILE = "timeline.md";
 const DECISIONS_FILE = "decisions.md";
 const TSID_MAP_FILE = "tsid-session-map.json";
+const ROUTE_TRACE_FILE = "route-trace.jsonl";
 const SUMMARY_FETCH_TIMEOUT_MS = 30000;
 
 const DEFAULT_CONFIG = {
@@ -29,6 +30,8 @@ const DEFAULT_CONFIG = {
   recentTsidsForRecall: 4,
   routeMaxTokens: 120,
   routeTimelineEntries: 6,
+  persistRouteTrace: true,
+  routeTraceMaxEntries: 200,
   summaryMaxTokens: 700,
   recallKeywords: [
     "之前",
@@ -117,6 +120,10 @@ function getDecisionsPath(agentDir) {
 
 function getTsidMapPath(agentDir) {
   return path.join(getHistoryDir(agentDir), TSID_MAP_FILE);
+}
+
+function getRouteTracePath(agentDir) {
+  return path.join(getHistoryDir(agentDir), ROUTE_TRACE_FILE);
 }
 
 function resolveAgentId(ctx) {
@@ -212,6 +219,27 @@ function dateFromTsid(tsid) {
     return null;
   }
   return `${tsid.slice(0, 4)}-${tsid.slice(4, 6)}-${tsid.slice(6, 8)}`;
+}
+
+function normalizeDateKey(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const compactMatch = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactMatch) {
+    return `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`;
+  }
+  const dateMatch = text.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})(?:日)?$/);
+  if (!dateMatch) {
+    return "";
+  }
+  const monthNumber = Number(dateMatch[2]);
+  const dayNumber = Number(dateMatch[3]);
+  if (!isValidMonthDay(monthNumber, dayNumber)) {
+    return "";
+  }
+  return `${dateMatch[1]}-${formatDatePart(monthNumber)}-${formatDatePart(dayNumber)}`;
 }
 
 async function generateUniqueTsid(agentDir) {
@@ -818,6 +846,20 @@ async function appendDecisions(agentDir, tsid, decisionText) {
   await fsp.writeFile(decisionsPath, `${existing}\n\n${header}\n\n${tagged}\n`, "utf8");
 }
 
+async function appendRouteTrace(agentDir, traceEntry, options) {
+  if (!traceEntry || typeof traceEntry !== "object") {
+    return;
+  }
+  const tracePath = getRouteTracePath(agentDir);
+  const existing = (await safeReadText(tracePath))
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  existing.push(JSON.stringify(traceEntry));
+  const clipped = existing.slice(-Math.max(1, options.routeTraceMaxEntries || 1));
+  await fsp.writeFile(tracePath, `${clipped.join("\n")}\n`, "utf8");
+}
+
 function parseTimeline(timelineText) {
   const lines = String(timelineText || "")
     .split("\n")
@@ -1038,6 +1080,32 @@ function parseJsonObject(text) {
   }
 }
 
+function extractRouteDates(parsed, availableDates) {
+  const candidates = [];
+  const collect = (value) => {
+    if (typeof value === "string" && value.trim()) {
+      candidates.push(value.trim());
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === "string" && entry.trim()) {
+          candidates.push(entry.trim());
+        }
+      }
+    }
+  };
+  collect(parsed?.l1Dates);
+  collect(parsed?.dates);
+  collect(parsed?.targetDates);
+  collect(parsed?.l1Date);
+  collect(parsed?.date);
+  const allowed = new Set(Array.isArray(availableDates) ? availableDates.filter(Boolean) : []);
+  return [...new Set(candidates.map(normalizeDateKey).filter(Boolean))].filter((dateKey) => {
+    return allowed.size === 0 || allowed.has(dateKey);
+  });
+}
+
 function isVagueRecallPrompt(promptText) {
   const text = String(promptText || "").trim();
   if (!text) {
@@ -1096,6 +1164,7 @@ async function routeRecallLayers(api, cfg, ctx, options, promptText, l0Result, p
   if (!routeModelSpec) {
     return null;
   }
+  const availableDates = chooseRecentDates(l0Result.dateMap, Math.max(1, options.routeTimelineEntries || 1));
   const routeTimeline = l0Result.lines.slice(-Math.max(1, options.routeTimelineEntries || 1)).join("\n");
   const raw = await callTextModel(api, cfg, ctx, options, {
     modelSpec: routeModelSpec,
@@ -1105,8 +1174,9 @@ async function routeRecallLayers(api, cfg, ctx, options, promptText, l0Result, p
       "L0 时间线默认已经可用，不需要你决定。",
       "L1 适合找命令、路径、配置、端口、结论、摘要化事实。",
       "L2 适合找完整对话、原话、逐字内容、完整过程，或当 L1 不足以回答时。",
+      "如果你能从时间线里定位到具体日期，请返回 l1Dates 数组，只保留最相关的 YYYY-MM-DD 日期。",
       "只输出 JSON，不要解释。",
-      '格式: {"loadL1": boolean, "loadL2": boolean, "reason": string}',
+      '格式: {"loadL1": boolean, "loadL2": boolean, "reason": string, "l1Dates": ["YYYY-MM-DD"]}',
     ].join("\n"),
     userPrompt: [
       "当前用户请求：",
@@ -1114,6 +1184,9 @@ async function routeRecallLayers(api, cfg, ctx, options, promptText, l0Result, p
       "",
       "最近的 L0 时间线：",
       routeTimeline || "(empty)",
+      "",
+      "可选日期（若返回 l1Dates，只能从这些日期中选择）：",
+      availableDates.join(", ") || "(empty)",
       "",
       "如果用户只是在泛泛提到历史，且并未索要具体事实，可让 loadL1=false。",
       "如果用户要求完整对话、原文、逐字、详细过程，或明确需要强证据，设 loadL2=true。",
@@ -1126,6 +1199,8 @@ async function routeRecallLayers(api, cfg, ctx, options, promptText, l0Result, p
   return {
     loadL1: parsed.loadL1 === true || parsed.needL1 === true,
     loadL2: parsed.loadL2 === true || parsed.needL2 === true,
+    l1Dates: extractRouteDates(parsed, availableDates),
+    reason: typeof parsed.reason === "string" ? parsed.reason.trim().slice(0, 160) : "",
   };
 }
 
@@ -1377,6 +1452,15 @@ async function buildPromptContext(api, options, event, ctx) {
     ? await routeRecallLayers(api, api.config, ctx, options, plan.normalizedPrompt || promptText, l0Result, plan)
     : null;
   const segments = [];
+  const recallDates =
+    routeDecision && Array.isArray(routeDecision.l1Dates) && routeDecision.l1Dates.length > 0
+      ? routeDecision.l1Dates
+      : plan.dates;
+  const recallTsids =
+    plan.explicitTsids.length > 0
+      ? plan.explicitTsids
+      : recallDates.flatMap((dateKey) => l0Result.dateMap[dateKey] || []).filter(Boolean);
+  const scopedTsids = recallTsids.length > 0 ? [...new Set(recallTsids)] : plan.tsids;
 
   if ((options.alwaysLoadL0 || plan.recall) && l0Result.prompt) {
     segments.push(l0Result.prompt);
@@ -1395,8 +1479,8 @@ async function buildPromptContext(api, options, event, ctx) {
     l1Result = await loadL1(
       agentDir,
       {
-        dates: plan.dates,
-        tsids: plan.tsids,
+        dates: recallDates,
+        tsids: scopedTsids,
         scoreTsids: plan.explicitTsids,
         promptText: plan.normalizedPrompt || promptText,
       },
@@ -1408,13 +1492,48 @@ async function buildPromptContext(api, options, event, ctx) {
   }
 
   if (shouldLoadL2) {
-    const l2Tsids =
-      l1Result.tsids && l1Result.tsids.length > 0 ? l1Result.tsids : plan.tsids;
+    const l2Tsids = l1Result.tsids && l1Result.tsids.length > 0 ? l1Result.tsids : scopedTsids;
     const sessionIds = resolveSessionIdsFromTsids(l2Tsids, l0Result.tsidMap);
     const l2Result = await loadL2(agentDir, sessionIds, options);
     if (l2Result.available) {
       segments.push(l2Result.prompt);
     }
+  }
+
+  if (options.persistRouteTrace && plan.recall) {
+    await enqueueWrite(agentDir, async () => {
+      await ensureHistoryDir(agentDir);
+      await appendRouteTrace(
+        agentDir,
+        {
+          ts: new Date().toISOString(),
+          sessionId: ctx?.sessionId || "",
+          prompt: sanitizeInlineText(plan.normalizedPrompt || promptText).slice(0, 240),
+          plan: {
+            recall: Boolean(plan.recall),
+            strongRecall: Boolean(plan.strongRecall),
+            explicitTsids: plan.explicitTsids,
+            explicitDates: plan.dates,
+          },
+          route: routeDecision
+            ? {
+                loadL1: Boolean(routeDecision.loadL1),
+                loadL2: Boolean(routeDecision.loadL2),
+                l1Dates: routeDecision.l1Dates || [],
+                reason: routeDecision.reason || "",
+              }
+            : null,
+          resolved: {
+            dates: recallDates,
+            tsids: scopedTsids,
+            loadedL0: segments.some((segment) => segment.includes("<conversation_timeline>")),
+            loadedL1: segments.some((segment) => segment.includes("<key_decisions>")),
+            loadedL2: segments.some((segment) => segment.includes("<full_conversation>")),
+          },
+        },
+        options,
+      );
+    });
   }
 
   return segments.length > 0 ? { prependContext: segments.join("\n\n") } : undefined;
