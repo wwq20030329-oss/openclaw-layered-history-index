@@ -135,6 +135,8 @@ npm run analyze:trace -- ./history/route-trace.jsonl
 
 ### v0.1.2
 - 添加 `routeModel` 配置支持独立路由模型（如 LongCat-Flash-Lite）
+- 添加 Viking 风格工具能力包配置（TOOL_PACKS）
+- 添加 Workspace 文件按需加载支持
 - 优化配置默认值
 
 ### v0.1.1

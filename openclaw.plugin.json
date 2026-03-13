@@ -90,7 +90,8 @@
         "maximum": 1000
       },
       "routeModel": {
-        "type": "string"
+        "type": "string",
+        "description": "路由判断使用的轻量模型（如 LongCat-Flash-Lite）"
       },
       "summaryModel": {
         "type": "string"
