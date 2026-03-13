@@ -1272,7 +1272,7 @@ async function loadL1(agentDir, params, options) {
 }
 
 function parseSessionTranscript(rawText, options) {
-  const lines = [];
+  const messages = [];
   const rawLines = String(rawText || "")
     .split("\n")
     .filter(Boolean);
@@ -1290,12 +1290,109 @@ function parseSessionTranscript(rawText, options) {
       if (!text) {
         continue;
       }
-      lines.push(`[${role}]: ${text.slice(0, options.l2MaxCharsPerMessage)}`);
+      messages.push({
+        role,
+        text: text.slice(0, options.l2MaxCharsPerMessage),
+      });
     } catch {
       continue;
     }
   }
-  return lines.slice(-options.l2MaxMessagesPerSession).join("\n\n");
+  return messages;
+}
+
+function renderSessionMessages(messages) {
+  return messages.map((message) => `[${message.role}]: ${message.text}`).join("\n\n");
+}
+
+function renderSelectedSessionMessages(messages, indexes) {
+  if (!Array.isArray(indexes) || indexes.length === 0) {
+    return "";
+  }
+  const lines = [];
+  let previousIndex = -1;
+  for (const index of indexes) {
+    if (previousIndex >= 0 && index > previousIndex + 1) {
+      lines.push(`...[omitted ${index - previousIndex - 1} unrelated messages]...`);
+    }
+    lines.push(`[${messages[index].role}]: ${messages[index].text}`);
+    previousIndex = index;
+  }
+  return lines.join("\n\n");
+}
+
+function buildTargetedSessionTranscript(rawText, promptText, options, params = {}) {
+  const messages = parseSessionTranscript(rawText, options);
+  if (messages.length === 0) {
+    return "";
+  }
+
+  const maxMessages = Math.max(1, options.l2MaxMessagesPerSession || DEFAULT_CONFIG.l2MaxMessagesPerSession);
+  const fallbackMessages = messages.slice(-maxMessages);
+  const matchKeywords = tokenizeForMatch(stripRecallPhrases(promptText || "", options));
+  if (matchKeywords.length === 0) {
+    return renderSessionMessages(fallbackMessages);
+  }
+
+  const scored = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const baseScore = scoreTextMatch(message.text, matchKeywords);
+    if (baseScore <= 0) {
+      continue;
+    }
+    scored.push({
+      index,
+      score: baseScore + (message.role === "assistant" ? 1 : 0),
+    });
+  }
+
+  if (scored.length === 0) {
+    return renderSessionMessages(fallbackMessages);
+  }
+
+  scored.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return right.index - left.index;
+  });
+
+  const maxMatchAnchors = params.strongRecall ? 4 : 2;
+  const selectedIndexes = new Set();
+  const chosenAnchors = [];
+
+  for (const candidate of scored) {
+    if (chosenAnchors.length >= maxMatchAnchors || selectedIndexes.size >= maxMessages) {
+      break;
+    }
+    if (chosenAnchors.some((anchor) => Math.abs(anchor - candidate.index) <= 1)) {
+      continue;
+    }
+
+    chosenAnchors.push(candidate.index);
+    selectedIndexes.add(candidate.index);
+
+    if (messages[candidate.index].role === "user") {
+      const next = messages[candidate.index + 1];
+      if (next && next.role === "assistant") {
+        selectedIndexes.add(candidate.index + 1);
+      }
+    } else {
+      const previous = messages[candidate.index - 1];
+      if (previous && previous.role === "user") {
+        selectedIndexes.add(candidate.index - 1);
+      }
+    }
+  }
+
+  const orderedIndexes = [...selectedIndexes]
+    .sort((left, right) => left - right)
+    .slice(0, maxMessages);
+
+  return orderedIndexes.length > 0
+    ? renderSelectedSessionMessages(messages, orderedIndexes)
+    : renderSessionMessages(fallbackMessages);
 }
 
 async function resolveSessionFilePath(sessionsDir, sessionId) {
@@ -1315,7 +1412,7 @@ async function resolveSessionFilePath(sessionsDir, sessionId) {
   }
 }
 
-async function loadL2(agentDir, sessionIds, options) {
+async function loadL2(agentDir, sessionIds, promptText, options, params = {}) {
   const sessionsDir = resolveSessionsDir(agentDir);
   const targetIds = Array.isArray(sessionIds) ? sessionIds.filter(Boolean).slice(0, options.l2MaxSessions) : [];
   if (targetIds.length === 0) {
@@ -1333,7 +1430,7 @@ async function loadL2(agentDir, sessionIds, options) {
       continue;
     }
     const raw = await safeReadText(filePath);
-    const text = parseSessionTranscript(raw, options);
+    const text = buildTargetedSessionTranscript(raw, promptText, options, params);
     if (!text) {
       continue;
     }
@@ -1348,7 +1445,7 @@ async function loadL2(agentDir, sessionIds, options) {
   }
   return {
     available: true,
-    prompt: `<full_conversation>\n以下是相关完整对话：\n${chunks.join("\n\n---\n\n")}\n</full_conversation>`,
+    prompt: `<full_conversation>\n以下是按问题缩窄后的相关历史对话片段：\n${chunks.join("\n\n---\n\n")}\n</full_conversation>`,
   };
 }
 
@@ -1494,7 +1591,9 @@ async function buildPromptContext(api, options, event, ctx) {
   if (shouldLoadL2) {
     const l2Tsids = l1Result.tsids && l1Result.tsids.length > 0 ? l1Result.tsids : scopedTsids;
     const sessionIds = resolveSessionIdsFromTsids(l2Tsids, l0Result.tsidMap);
-    const l2Result = await loadL2(agentDir, sessionIds, options);
+    const l2Result = await loadL2(agentDir, sessionIds, plan.normalizedPrompt || promptText, options, {
+      strongRecall: plan.strongRecall,
+    });
     if (l2Result.available) {
       segments.push(l2Result.prompt);
     }

@@ -20,6 +20,7 @@ It adds:
 - Uses `L0 + L1` for facts like paths, commands, ports, config, URLs
 - Uses `L0 + L1 + L2` for full transcript recall
 - Lets the route model pick specific `L1` dates from the timeline before loading decisions
+- Narrows `L2` to relevant turns instead of dumping the full tail of a session
 - Handles current OpenClaw runtime quirks such as missing runtime auth and timestamp/IP false positives
 
 ## Files Written

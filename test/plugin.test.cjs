@@ -316,6 +316,30 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
             content: [
               {
                 type: "text",
+                text: "[Fri 2026-03-13 06:58 GMT+8] 先记一下 docker build 需要 --no-cache。",
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "收到，docker build --no-cache 这个我先记着。",
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "text",
                 text: "[Fri 2026-03-13 07:01 GMT+8] 请记录部署目录 /srv/openclaw/app、重启命令 pm2 restart openclaw-web、Nginx 端口 8317 和配置文件 /etc/nginx/conf.d/openclaw.conf。",
               },
             ],
@@ -329,6 +353,30 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
               {
                 type: "text",
                 text: "已记录：部署目录 /srv/openclaw/app，重启命令 pm2 restart openclaw-web，Nginx 端口 8317，配置文件 /etc/nginx/conf.d/openclaw.conf。",
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "[Fri 2026-03-13 07:03 GMT+8] UI 颜色后面改成蓝色系。",
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "好的，UI 颜色改成蓝色系。",
               },
             ],
           },
@@ -409,6 +457,11 @@ test("uses layered routing for vague recall, fact recall, and full replay recall
   assert.match(full.prependContext, /<conversation_timeline>/);
   assert.match(full.prependContext, /<key_decisions>/);
   assert.match(full.prependContext, /<full_conversation>/);
+  assert.match(full.prependContext, /按问题缩窄后的相关历史对话片段/);
+  assert.match(full.prependContext, /部署目录 \/srv\/openclaw\/app/);
+  assert.match(full.prependContext, /配置文件 \/etc\/nginx\/conf\.d\/openclaw\.conf/);
+  assert.doesNotMatch(full.prependContext, /docker build --no-cache/);
+  assert.doesNotMatch(full.prependContext, /UI 颜色改成蓝色系/);
 
   assert.ok(routeModels.every((entry) => entry === "MiniMax-M2.5-highspeed"));
   assert.equal(routeEntries.length, 3);
