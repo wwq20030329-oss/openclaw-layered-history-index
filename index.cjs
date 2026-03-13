@@ -11,6 +11,23 @@ const TSID_MAP_FILE = "tsid-session-map.json";
 const ROUTE_TRACE_FILE = "route-trace.jsonl";
 const SUMMARY_FETCH_TIMEOUT_MS = 30000;
 
+// Tool packs and file descriptions for routing
+const TOOL_PACKS = {
+  "base-ext": { description: "基础扩展工具（文件编辑、代码处理）" },
+  "web": { description: "网络搜索和网页访问" },
+  "message": { description: "消息发送和通知" },
+  "infra": { description: "基础设施和定时任务" },
+};
+
+const FILE_DESCRIPTIONS = {
+  "SOUL.md": "AI 助手的身份和人格定义",
+  "IDENTITY.md": "助手的基本身份信息",
+  "USER.md": "用户信息和偏好",
+  "MEMORY.md": "长期记忆文件",
+  "TOOLS.md": "工具配置和本地笔记",
+  "AGENTS.md": "工作区规则和指南",
+};
+
 const DEFAULT_CONFIG = {
   alwaysLoadL0: true,
   captureWithLlm: true,
