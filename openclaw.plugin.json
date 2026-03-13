@@ -2,75 +2,90 @@
   "id": "layered-history-index",
   "name": "Layered History Index",
   "description": "Layered L0/L1/L2 conversation indexing inspired by OpenViking.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "alwaysLoadL0": {
-        "type": "boolean"
+        "type": "boolean",
+        "default": false
       },
       "captureWithLlm": {
-        "type": "boolean"
+        "type": "boolean",
+        "default": true
       },
       "llmRouting": {
-        "type": "boolean"
+        "type": "boolean",
+        "default": true
       },
       "l0PromptEntries": {
         "type": "integer",
+        "default": 20,
         "minimum": 10,
         "maximum": 200
       },
       "maxTimelineEntries": {
         "type": "integer",
+        "default": 100,
         "minimum": 50,
         "maximum": 1000
       },
       "l1PromptChars": {
         "type": "integer",
+        "default": 2500,
         "minimum": 500,
         "maximum": 20000
       },
       "l1MaxLines": {
         "type": "integer",
+        "default": 4,
         "minimum": 1,
         "maximum": 20
       },
       "l2PromptChars": {
         "type": "integer",
+        "default": 6000,
         "minimum": 1000,
         "maximum": 30000
       },
       "l2MaxSessions": {
         "type": "integer",
-        "minimum": 1,
+        "default": 1,
+        "minimum": 0,
         "maximum": 5
       },
       "recentDaysForRecall": {
         "type": "integer",
+        "default": 2,
         "minimum": 1,
         "maximum": 14
       },
       "recentTsidsForRecall": {
         "type": "integer",
+        "default": 2,
         "minimum": 1,
         "maximum": 20
       },
       "routeMaxTokens": {
         "type": "integer",
+        "default": 120,
         "minimum": 32,
         "maximum": 1000
       },
       "routeTimelineEntries": {
         "type": "integer",
+        "default": 4,
         "minimum": 1,
         "maximum": 40
       },
       "persistRouteTrace": {
-        "type": "boolean"
+        "type": "boolean",
+        "default": true
       },
       "routeTraceMaxEntries": {
         "type": "integer",
+        "default": 200,
         "minimum": 10,
         "maximum": 1000
       },
@@ -82,15 +97,29 @@
       },
       "recallKeywords": {
         "type": "array",
+        "default": ["回忆", "之前", "上次", "以前", "记得"],
         "items": {
           "type": "string"
         }
       },
       "strongRecallKeywords": {
         "type": "array",
+        "default": ["详细", "完整", "所有", "具体"],
         "items": {
           "type": "string"
         }
+      },
+      "maxHistoryDays": {
+        "type": "integer",
+        "default": 30,
+        "minimum": 7,
+        "maximum": 365,
+        "description": "自动清理历史文件，保留天数"
+      },
+      "autoCleanup": {
+        "type": "boolean",
+        "default": true,
+        "description": "是否启用自动清理"
       }
     }
   }

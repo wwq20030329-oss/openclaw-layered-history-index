@@ -1,9 +1,12 @@
 {
-  "name": "openclaw-layered-history-index",
-  "version": "0.1.0",
+  "name": "layered-history-index",
+  "version": "0.1.1",
   "private": true,
   "description": "Layered conversation memory plugin for OpenClaw",
   "type": "commonjs",
+  "openclaw": {
+    "extensions": ["./index.cjs"]
+  },
   "scripts": {
     "test": "node --test",
     "analyze:trace": "node scripts/analyze-route-trace.cjs"
