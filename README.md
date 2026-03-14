@@ -56,6 +56,7 @@ openclaw plugins install -l .
 | `extraToolPacks` | `[]` | 用户自定义工具包，格式：`[{"name":"工具名","description":"描述"}]` |
 | `extraFiles` | `[]` | 用户自定义工作区文件，格式：`[{"name":"文件名","description":"描述"}]` |
 | `routingPromptTemplate` | `null` | 自定义路由 Prompt 模板，支持 `{{userMessage}}`, `{{timelineSection}}`, `{{packIndex}}`, `{{fileIndex}}` 变量 |
+| `enableRouteMetrics` | `true` | 是否启用路由性能指标统计 |
 | `autoCleanup` | true | 启用自动清理 |
 | `maxHistoryDays` | 30 | 历史保留天数 |
 
@@ -147,9 +148,57 @@ npm test
 
 # 分析 token 节省
 npm run analyze:trace -- ./history/route-trace.jsonl
+
+# 分析路由日志（新）
+npm run analyze:routing -- ~/.openclaw/agents/main/agent/history/route-trace.jsonl
+```
+
+### 路由分析工具输出示例
+
+```
+============================================================
+  Layered History Index - 路由日志分析报告
+============================================================
+
+📊 总体统计
+----------------------------------------
+总记录数：150
+有路由决策：120 (80.0%)
+无路由决策：30 (20.0%)
+
+🎯 路由决策分布
+----------------------------------------
+需要 L1 (决策记录): 85
+需要 L2 (完整对话): 12
+无需回忆：53
+
+🔧 工具包使用 Top 10
+----------------------------------------
+  base-ext: 45 次
+  web: 18 次
+  message: 8 次
+
+📁 文件使用 Top 10
+----------------------------------------
+  SOUL.md: 120 次
+  USER.md: 120 次
+  TOOLS.md: 35 次
 ```
 
 ## 更新日志
+
+### v0.3.0
+- **新增**: 路由性能指标统计 (`enableRouteMetrics`)
+  - 记录总调用次数、缓存命中率、模型调用延迟、错误次数
+  - 可通过 `getMetrics()` 函数获取实时指标
+- **新增**: 路由日志分析工具 (`scripts/analyze-routing.js`)
+  - 分析路由决策分布（L0/L1/L2 使用比例）
+  - 统计工具包和文件使用频率
+  - 提取路由原因关键词
+  - 日期分布分析
+- **新增**: `npm run analyze:routing` 命令
+- **优化**: 路由函数添加延迟统计和错误分类
+- **文档**: 更新 README 添加分析工具使用说明和输出示例
 
 ### v0.2.0
 - **新增**: 路由缓存功能 - 通过 `routeCacheTtlSeconds` 配置缓存时间（默认 300 秒），避免重复调用路由模型

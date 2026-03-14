@@ -143,6 +143,11 @@
           "user": { "type": "string", "description": "用户提示词模板，支持 {{userMessage}}, {{timelineSection}}, {{packIndex}}, {{fileIndex}} 变量" }
         }
       },
+      "enableRouteMetrics": {
+        "type": "boolean",
+        "default": true,
+        "description": "是否启用路由性能指标统计"
+      },
       "summaryModel": {
         "type": "string"
       },

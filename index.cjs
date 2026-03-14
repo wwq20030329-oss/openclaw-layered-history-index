@@ -15,6 +15,47 @@ const SUMMARY_FETCH_TIMEOUT_MS = 30000;
 // 路由缓存（内存）
 const routeCache = new Map();
 
+// 路由性能指标
+const routeMetrics = {
+  totalCalls: 0,
+  cacheHits: 0,
+  cacheMisses: 0,
+  modelCalls: 0,
+  modelErrors: 0,
+  totalLatencyMs: 0,
+  lastCallTimestamp: null,
+};
+
+function updateMetrics(event, latencyMs, isCached) {
+  routeMetrics.totalCalls += 1;
+  routeMetrics.lastCallTimestamp = Date.now();
+  if (isCached) {
+    routeMetrics.cacheHits += 1;
+  } else {
+    routeMetrics.cacheMisses += 1;
+    if (event === "model_call") {
+      routeMetrics.modelCalls += 1;
+      routeMetrics.totalLatencyMs += latencyMs || 0;
+    } else if (event === "model_error") {
+      routeMetrics.modelErrors += 1;
+    }
+  }
+}
+
+function getMetrics() {
+  const avgLatency = routeMetrics.modelCalls > 0
+    ? Math.round(routeMetrics.totalLatencyMs / routeMetrics.modelCalls)
+    : 0;
+  const hitRate = routeMetrics.totalCalls > 0
+    ? ((routeMetrics.cacheHits / routeMetrics.totalCalls) * 100).toFixed(1)
+    : 0;
+  return {
+    ...routeMetrics,
+    averageLatencyMs: avgLatency,
+    cacheHitRatePercent: parseFloat(hitRate),
+  };
+}
+
 // Tool packs and file descriptions for routing
 const DEFAULT_TOOL_PACKS = {
   "base-ext": { description: "基础扩展工具（文件编辑、代码处理）" },
@@ -63,6 +104,7 @@ const DEFAULT_CONFIG = {
   extraToolPacks: [],
   extraFiles: [],
   routingPromptTemplate: null,
+  enableRouteMetrics: true,
   l0PromptEntries: 60,
   maxTimelineEntries: 300,
   l1PromptChars: 6000,
@@ -156,6 +198,7 @@ async function callRoutingModel(api, options, userMessage, timeline, ctx) {
   const extraToolPacks = Array.isArray(options.extraToolPacks) ? options.extraToolPacks : [];
   const extraFiles = Array.isArray(options.extraFiles) ? options.extraFiles : [];
   const routingPromptTemplate = options.routingPromptTemplate || null;
+  const enableRouteMetrics = options.enableRouteMetrics !== false;
   
   if (!routeModel) {
     return null;
@@ -165,8 +208,11 @@ async function callRoutingModel(api, options, userMessage, timeline, ctx) {
   const cacheKey = getRouteCacheKey(userMessage, timeline);
   const cachedResult = getFromCache(cacheKey, routeCacheTtlSeconds);
   if (cachedResult) {
+    if (enableRouteMetrics) updateMetrics("cache_hit", 0, true);
     return cachedResult;
   }
+  
+  if (enableRouteMetrics) updateMetrics("cache_miss", 0, false);
 
   // 推断提供商
   let provider = routeModelProvider;
@@ -236,6 +282,7 @@ Rules:
 10. If no Timeline is provided or unrelated to past work, set needsL1: false, l1Dates: [], needsL2: false.`;
   }
 
+  const callStartMs = Date.now();
   try {
     const response = await api.ai.call(
       { provider, model: { id: routeModel } },
@@ -248,6 +295,7 @@ Rules:
         temperature: 0,
       }
     );
+    const latencyMs = Date.now() - callStartMs;
 
     const content = response?.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -255,6 +303,7 @@ Rules:
       if (logRoutingFailures) {
         console.error(`[layered-history-index] Routing model returned non-JSON content: ${content?.slice(0, 100)}`);
       }
+      if (enableRouteMetrics) updateMetrics("model_error", latencyMs, false);
       return null;
     }
 
@@ -274,11 +323,15 @@ Rules:
       setCache(cacheKey, validated);
     }
     
+    if (enableRouteMetrics) updateMetrics("model_call", latencyMs, false);
+    
     return validated;
   } catch (err) {
+    const latencyMs = Date.now() - callStartMs;
     if (logRoutingFailures) {
       console.error(`[layered-history-index] Routing model call failed: ${err.message || err}`);
     }
+    if (enableRouteMetrics) updateMetrics("model_error", latencyMs, false);
     return null;
   }
 }
@@ -335,6 +388,9 @@ function mergeConfig(pluginConfig) {
   }
   if (pluginConfig.routingPromptTemplate && typeof pluginConfig.routingPromptTemplate === "object") {
     merged.routingPromptTemplate = pluginConfig.routingPromptTemplate;
+  }
+  if (typeof pluginConfig.enableRouteMetrics === "boolean") {
+    merged.enableRouteMetrics = pluginConfig.enableRouteMetrics;
   }
   return merged;
 }
