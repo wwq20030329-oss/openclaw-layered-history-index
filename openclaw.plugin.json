@@ -93,6 +93,10 @@
         "type": "string",
         "description": "路由判断使用的轻量模型（如 LongCat-Flash-Lite）"
       },
+      "routeModelProvider": {
+        "type": "string",
+        "description": "路由模型所属的提供商（如 qqoq-duckdns-org），留空则根据模型名自动推断"
+      },
       "summaryModel": {
         "type": "string"
       },

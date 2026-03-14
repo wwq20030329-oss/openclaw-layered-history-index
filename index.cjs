@@ -33,6 +33,7 @@ const DEFAULT_CONFIG = {
   captureWithLlm: true,
   llmRouting: true,
   routeModel: "",
+  routeModelProvider: "",
   l0PromptEntries: 60,
   maxTimelineEntries: 300,
   l1PromptChars: 6000,
@@ -90,8 +91,21 @@ const DEFAULT_CONFIG = {
 // ========================
 async function callRoutingModel(api, options, userMessage, timeline) {
   const routeModel = options.routeModel || "";
+  const routeModelProvider = options.routeModelProvider || "";
   if (!routeModel) {
     return null;
+  }
+
+  // 推断提供商：如果未配置，尝试从模型名推断
+  let provider = routeModelProvider;
+  if (!provider) {
+    if (routeModel.toLowerCase().includes("longcat")) {
+      provider = "qqoq-duckdns-org";
+    } else if (routeModel.toLowerCase().includes("minimax")) {
+      provider = "minimax-portal";
+    } else {
+      provider = "qqoq-duckdns-org"; // 默认 fallback
+    }
   }
 
   const packIndex = Object.entries(TOOL_PACKS)
@@ -134,7 +148,7 @@ Rules:
 
   try {
     const response = await api.ai.call(
-      { provider: "minimax-portal", model: { id: routeModel } },
+      { provider: provider, model: { id: routeModel } },
       {
         messages: [
           { role: "system", content: systemPrompt },
@@ -199,6 +213,9 @@ function mergeConfig(pluginConfig) {
   }
   if (typeof pluginConfig.routeModel === "string" && pluginConfig.routeModel.trim()) {
     merged.routeModel = pluginConfig.routeModel.trim();
+  }
+  if (typeof pluginConfig.routeModelProvider === "string" && pluginConfig.routeModelProvider.trim()) {
+    merged.routeModelProvider = pluginConfig.routeModelProvider.trim();
   }
   return merged;
 }
