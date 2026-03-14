@@ -49,6 +49,9 @@ openclaw plugins install -l .
 | `routeTraceMaxEntries` | 200 | 追踪日志最大条目 |
 | `routeTimelineEntries` | 4 | 路由时间线条目数 |
 | `routeMaxTokens` | 120 | 路由最大 token 数 |
+| `routeModel` | `""` | 路由判断使用的轻量模型（如 LongCat-Flash-Lite） |
+| `routeModelProvider` | `""` | 路由模型所属的提供商（如 qqoq-duckdns-org），留空则根据模型名自动推断 |
+| `logRoutingFailures` | `true` | 是否在路由失败时输出错误日志 |
 | `autoCleanup` | true | 启用自动清理 |
 | `maxHistoryDays` | 30 | 历史保留天数 |
 
@@ -73,6 +76,8 @@ openclaw plugins install -l .
           "persistRouteTrace": true,
           "routeTraceMaxEntries": 200,
           "routeModel": "LongCat-Flash-Lite",
+          "routeModelProvider": "qqoq-duckdns-org",
+          "logRoutingFailures": true,
           "autoCleanup": true,
           "maxHistoryDays": 30
         }
@@ -132,6 +137,14 @@ npm run analyze:trace -- ./history/route-trace.jsonl
 ```
 
 ## 更新日志
+
+### v0.1.4
+- **修复**: 添加 `routeModelProvider` 配置项，解决路由模型提供商写死问题
+- **修复**: 路由模型调用支持从模型名自动推断提供商（LongCat-* → qqoq-duckdns-org, MiniMax-* → minimax-portal）
+- **新增**: `logRoutingFailures` 配置项，控制是否在路由失败时输出错误日志
+- **修复**: 路由结果严格验证（类型检查、日期格式验证、字段长度限制）
+- **修复**: 更新 package.json 版本号为 0.1.4
+- **文档**: 更新 README 配置选项和示例，添加 `routeModelProvider` 和 `logRoutingFailures` 说明
 
 ### v0.1.3
 - 添加完整的 Viking 风格路由模型调用逻辑

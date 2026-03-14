@@ -34,6 +34,7 @@ const DEFAULT_CONFIG = {
   llmRouting: true,
   routeModel: "",
   routeModelProvider: "",
+  logRoutingFailures: true,
   l0PromptEntries: 60,
   maxTimelineEntries: 300,
   l1PromptChars: 6000,
@@ -89,9 +90,10 @@ const DEFAULT_CONFIG = {
 // ========================
 // Viking 风格路由模型调用
 // ========================
-async function callRoutingModel(api, options, userMessage, timeline) {
+async function callRoutingModel(api, options, userMessage, timeline, ctx) {
   const routeModel = options.routeModel || "";
   const routeModelProvider = options.routeModelProvider || "";
+  const logRoutingFailures = options.logRoutingFailures !== false; // 默认 true
   if (!routeModel) {
     return null;
   }
@@ -162,19 +164,29 @@ Rules:
     const content = response?.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
+      if (logRoutingFailures) {
+        console.error(`[layered-history-index] Routing model returned non-JSON content: ${content?.slice(0, 100)}`);
+      }
       return null;
     }
 
     const result = JSON.parse(jsonMatch[0]);
-    return {
-      packs: Array.isArray(result.packs) ? result.packs : [],
-      files: Array.isArray(result.files) ? result.files : ["SOUL.md", "IDENTITY.md", "USER.md"],
+    
+    // 严格验证路由结果
+    const validated = {
+      packs: Array.isArray(result.packs) ? result.packs.filter(p => typeof p === "string") : [],
+      files: Array.isArray(result.files) ? result.files.filter(f => typeof f === "string") : ["SOUL.md", "IDENTITY.md", "USER.md"],
       needsL1: Boolean(result.needsL1),
-      l1Dates: Array.isArray(result.l1Dates) ? result.l1Dates : [],
+      l1Dates: Array.isArray(result.l1Dates) ? result.l1Dates.filter(d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) : [],
       needsL2: Boolean(result.needsL2),
-      reason: result.reason || "",
+      reason: typeof result.reason === "string" ? result.reason.slice(0, 200) : "",
     };
+    
+    return validated;
   } catch (err) {
+    if (logRoutingFailures) {
+      console.error(`[layered-history-index] Routing model call failed: ${err.message || err}`);
+    }
     return null;
   }
 }
@@ -216,6 +228,9 @@ function mergeConfig(pluginConfig) {
   }
   if (typeof pluginConfig.routeModelProvider === "string" && pluginConfig.routeModelProvider.trim()) {
     merged.routeModelProvider = pluginConfig.routeModelProvider.trim();
+  }
+  if (typeof pluginConfig.logRoutingFailures === "boolean") {
+    merged.logRoutingFailures = pluginConfig.logRoutingFailures;
   }
   return merged;
 }
@@ -1770,7 +1785,7 @@ async function buildPromptContext(api, options, event, ctx) {
   
   // Viking 风格路由模型调用
   const routeDecision = options.routeModel
-    ? await callRoutingModel(api, options, promptText, l0Result.prompt || "")
+    ? await callRoutingModel(api, options, promptText, l0Result.prompt || "", event?.context)
     : null;
   
   const plan = buildRecallPlan(promptText, l0Result, options);

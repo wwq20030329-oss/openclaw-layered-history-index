@@ -97,6 +97,11 @@
         "type": "string",
         "description": "路由模型所属的提供商（如 qqoq-duckdns-org），留空则根据模型名自动推断"
       },
+      "logRoutingFailures": {
+        "type": "boolean",
+        "default": true,
+        "description": "是否在路由失败时输出错误日志"
+      },
       "summaryModel": {
         "type": "string"
       },
