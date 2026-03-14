@@ -52,6 +52,10 @@ openclaw plugins install -l .
 | `routeModel` | `""` | 路由判断使用的轻量模型（如 LongCat-Flash-Lite） |
 | `routeModelProvider` | `""` | 路由模型所属的提供商（如 qqoq-duckdns-org），留空则根据模型名自动推断 |
 | `logRoutingFailures` | `true` | 是否在路由失败时输出错误日志 |
+| `routeCacheTtlSeconds` | `300` | 路由结果缓存时间（秒），0 表示禁用缓存 |
+| `extraToolPacks` | `[]` | 用户自定义工具包，格式：`[{"name":"工具名","description":"描述"}]` |
+| `extraFiles` | `[]` | 用户自定义工作区文件，格式：`[{"name":"文件名","description":"描述"}]` |
+| `routingPromptTemplate` | `null` | 自定义路由 Prompt 模板，支持 `{{userMessage}}`, `{{timelineSection}}`, `{{packIndex}}`, `{{fileIndex}}` 变量 |
 | `autoCleanup` | true | 启用自动清理 |
 | `maxHistoryDays` | 30 | 历史保留天数 |
 
@@ -78,6 +82,15 @@ openclaw plugins install -l .
           "routeModel": "LongCat-Flash-Lite",
           "routeModelProvider": "qqoq-duckdns-org",
           "logRoutingFailures": true,
+          "routeCacheTtlSeconds": 300,
+          "extraToolPacks": [
+            {"name": "git", "description": "Git 版本控制操作"},
+            {"name": "docker", "description": "Docker 容器管理"}
+          ],
+          "extraFiles": [
+            {"name": "CLAUDE.md", "description": "Claude 协作规范"},
+            {"name": "PROJECT.md", "description": "项目说明文档"}
+          ],
           "autoCleanup": true,
           "maxHistoryDays": 30
         }
@@ -137,6 +150,15 @@ npm run analyze:trace -- ./history/route-trace.jsonl
 ```
 
 ## 更新日志
+
+### v0.2.0
+- **新增**: 路由缓存功能 - 通过 `routeCacheTtlSeconds` 配置缓存时间（默认 300 秒），避免重复调用路由模型
+- **新增**: `extraToolPacks` 配置项 - 支持用户自定义工具包（如 git、docker 等）
+- **新增**: `extraFiles` 配置项 - 支持用户自定义工作区文件（如 CLAUDE.md、PROJECT.md 等）
+- **新增**: `routingPromptTemplate` 配置项 - 支持自定义路由 Prompt 模板，支持多语言和场景定制
+- **优化**: 工具包和文件描述改为动态合并，不再硬编码
+- **优化**: 路由函数添加缓存键生成和缓存清理逻辑（最多 500 条）
+- **文档**: 更新配置表格和示例，添加新配置项说明
 
 ### v0.1.4
 - **修复**: 添加 `routeModelProvider` 配置项，解决路由模型提供商写死问题

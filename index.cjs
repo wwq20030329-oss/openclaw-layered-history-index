@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 const HISTORY_DIR = "history";
 const TIMELINE_FILE = "timeline.md";
@@ -11,15 +12,18 @@ const TSID_MAP_FILE = "tsid-session-map.json";
 const ROUTE_TRACE_FILE = "route-trace.jsonl";
 const SUMMARY_FETCH_TIMEOUT_MS = 30000;
 
+// 路由缓存（内存）
+const routeCache = new Map();
+
 // Tool packs and file descriptions for routing
-const TOOL_PACKS = {
+const DEFAULT_TOOL_PACKS = {
   "base-ext": { description: "基础扩展工具（文件编辑、代码处理）" },
   "web": { description: "网络搜索和网页访问" },
   "message": { description: "消息发送和通知" },
   "infra": { description: "基础设施和定时任务" },
 };
 
-const FILE_DESCRIPTIONS = {
+const DEFAULT_FILE_DESCRIPTIONS = {
   "SOUL.md": "AI 助手的身份和人格定义",
   "IDENTITY.md": "助手的基本身份信息",
   "USER.md": "用户信息和偏好",
@@ -28,6 +32,26 @@ const FILE_DESCRIPTIONS = {
   "AGENTS.md": "工作区规则和指南",
 };
 
+function mergeToolPacks(extraPacks = []) {
+  const merged = { ...DEFAULT_TOOL_PACKS };
+  for (const pack of extraPacks) {
+    if (pack && typeof pack === "object" && pack.name && typeof pack.description === "string") {
+      merged[pack.name] = { description: pack.description };
+    }
+  }
+  return merged;
+}
+
+function mergeFileDescriptions(extraFiles = []) {
+  const merged = { ...DEFAULT_FILE_DESCRIPTIONS };
+  for (const file of extraFiles) {
+    if (file && typeof file === "object" && file.name && typeof file.description === "string") {
+      merged[file.name] = file.description;
+    }
+  }
+  return merged;
+}
+
 const DEFAULT_CONFIG = {
   alwaysLoadL0: true,
   captureWithLlm: true,
@@ -35,6 +59,10 @@ const DEFAULT_CONFIG = {
   routeModel: "",
   routeModelProvider: "",
   logRoutingFailures: true,
+  routeCacheTtlSeconds: 300,
+  extraToolPacks: [],
+  extraFiles: [],
+  routingPromptTemplate: null,
   l0PromptEntries: 60,
   maxTimelineEntries: 300,
   l1PromptChars: 6000,
@@ -90,15 +118,57 @@ const DEFAULT_CONFIG = {
 // ========================
 // Viking 风格路由模型调用
 // ========================
+
+// 生成缓存键
+function getRouteCacheKey(userMessage, timeline) {
+  const raw = `${userMessage}|||${timeline || ""}`;
+  return crypto.createHash("md5").update(raw).digest("hex");
+}
+
+// 检查缓存
+function getFromCache(cacheKey, ttlSeconds) {
+  if (!cacheKey || ttlSeconds <= 0) return null;
+  const cached = routeCache.get(cacheKey);
+  if (!cached) return null;
+  const ageMs = Date.now() - cached.timestamp;
+  if (ageMs > ttlSeconds * 1000) {
+    routeCache.delete(cacheKey);
+    return null;
+  }
+  return cached.result;
+}
+
+// 写入缓存
+function setCache(cacheKey, result) {
+  routeCache.set(cacheKey, { result, timestamp: Date.now() });
+  // 限制缓存大小（最多 500 条）
+  if (routeCache.size > 500) {
+    const firstKey = routeCache.keys().next().value;
+    routeCache.delete(firstKey);
+  }
+}
+
 async function callRoutingModel(api, options, userMessage, timeline, ctx) {
   const routeModel = options.routeModel || "";
   const routeModelProvider = options.routeModelProvider || "";
-  const logRoutingFailures = options.logRoutingFailures !== false; // 默认 true
+  const logRoutingFailures = options.logRoutingFailures !== false;
+  const routeCacheTtlSeconds = options.routeCacheTtlSeconds || 0;
+  const extraToolPacks = Array.isArray(options.extraToolPacks) ? options.extraToolPacks : [];
+  const extraFiles = Array.isArray(options.extraFiles) ? options.extraFiles : [];
+  const routingPromptTemplate = options.routingPromptTemplate || null;
+  
   if (!routeModel) {
     return null;
   }
 
-  // 推断提供商：如果未配置，尝试从模型名推断
+  // 检查缓存
+  const cacheKey = getRouteCacheKey(userMessage, timeline);
+  const cachedResult = getFromCache(cacheKey, routeCacheTtlSeconds);
+  if (cachedResult) {
+    return cachedResult;
+  }
+
+  // 推断提供商
   let provider = routeModelProvider;
   if (!provider) {
     if (routeModel.toLowerCase().includes("longcat")) {
@@ -106,15 +176,19 @@ async function callRoutingModel(api, options, userMessage, timeline, ctx) {
     } else if (routeModel.toLowerCase().includes("minimax")) {
       provider = "minimax-portal";
     } else {
-      provider = "qqoq-duckdns-org"; // 默认 fallback
+      provider = "qqoq-duckdns-org";
     }
   }
 
-  const packIndex = Object.entries(TOOL_PACKS)
+  // 合并工具包和文件描述
+  const toolPacks = mergeToolPacks(extraToolPacks);
+  const fileDescriptions = mergeFileDescriptions(extraFiles);
+
+  const packIndex = Object.entries(toolPacks)
     .map(([name, pack]) => `  - ${name}: ${pack.description}`)
     .join("\n");
 
-  const fileIndex = Object.entries(FILE_DESCRIPTIONS)
+  const fileIndex = Object.entries(fileDescriptions)
     .map(([name, desc]) => `  - ${name}: ${desc}`)
     .join("\n");
 
@@ -122,9 +196,22 @@ async function callRoutingModel(api, options, userMessage, timeline, ctx) {
     ? `===== Conversation Timeline (L0) =====\n${timeline}\n\n`
     : "";
 
-  const systemPrompt = `You are a resource router. Select capability packs and files needed for the task. Reply with ONLY a JSON object, no other text, no markdown.`;
-
-  const userPrompt = `User message: "${userMessage}"
+  // 支持自定义 Prompt 模板
+  let systemPrompt, userPrompt;
+  if (routingPromptTemplate && typeof routingPromptTemplate === "object") {
+    systemPrompt = typeof routingPromptTemplate.system === "string" 
+      ? routingPromptTemplate.system 
+      : `You are a resource router. Select capability packs and files needed for the task. Reply with ONLY a JSON object.`;
+    userPrompt = typeof routingPromptTemplate.user === "string"
+      ? routingPromptTemplate.user
+        .replace("{{userMessage}}", userMessage)
+        .replace("{{timelineSection}}", timelineSection)
+        .replace("{{packIndex}}", packIndex)
+        .replace("{{fileIndex}}", fileIndex)
+      : `User message: "${userMessage}"\n\n${timelineSection}===== Capability Packs =====\n${packIndex}\n\n===== Files =====\n${fileIndex}`;
+  } else {
+    systemPrompt = `You are a resource router. Select capability packs and files needed for the task. Reply with ONLY a JSON object, no other text, no markdown.`;
+    userPrompt = `User message: "${userMessage}"
 
 ${timelineSection}===== Capability Packs (select needed) =====
 Always loaded: read + exec (do not select)
@@ -147,10 +234,11 @@ Rules:
 8. If the user references previous work shown in the Timeline, set needsL1: true and l1Dates to the relevant dates from the Timeline (format: "YYYY-MM-DD").
 9. If the user needs the exact original conversation or full code, set needsL2: true.
 10. If no Timeline is provided or unrelated to past work, set needsL1: false, l1Dates: [], needsL2: false.`;
+  }
 
   try {
     const response = await api.ai.call(
-      { provider: provider, model: { id: routeModel } },
+      { provider, model: { id: routeModel } },
       {
         messages: [
           { role: "system", content: systemPrompt },
@@ -172,7 +260,6 @@ Rules:
 
     const result = JSON.parse(jsonMatch[0]);
     
-    // 严格验证路由结果
     const validated = {
       packs: Array.isArray(result.packs) ? result.packs.filter(p => typeof p === "string") : [],
       files: Array.isArray(result.files) ? result.files.filter(f => typeof f === "string") : ["SOUL.md", "IDENTITY.md", "USER.md"],
@@ -181,6 +268,11 @@ Rules:
       needsL2: Boolean(result.needsL2),
       reason: typeof result.reason === "string" ? result.reason.slice(0, 200) : "",
     };
+    
+    // 写入缓存
+    if (routeCacheTtlSeconds > 0) {
+      setCache(cacheKey, validated);
+    }
     
     return validated;
   } catch (err) {
@@ -231,6 +323,18 @@ function mergeConfig(pluginConfig) {
   }
   if (typeof pluginConfig.logRoutingFailures === "boolean") {
     merged.logRoutingFailures = pluginConfig.logRoutingFailures;
+  }
+  if (typeof pluginConfig.routeCacheTtlSeconds === "number" && pluginConfig.routeCacheTtlSeconds >= 0) {
+    merged.routeCacheTtlSeconds = pluginConfig.routeCacheTtlSeconds;
+  }
+  if (Array.isArray(pluginConfig.extraToolPacks)) {
+    merged.extraToolPacks = pluginConfig.extraToolPacks.filter(p => p && typeof p === "object" && p.name && p.description);
+  }
+  if (Array.isArray(pluginConfig.extraFiles)) {
+    merged.extraFiles = pluginConfig.extraFiles.filter(f => f && typeof f === "object" && f.name && f.description);
+  }
+  if (pluginConfig.routingPromptTemplate && typeof pluginConfig.routingPromptTemplate === "object") {
+    merged.routingPromptTemplate = pluginConfig.routingPromptTemplate;
   }
   return merged;
 }

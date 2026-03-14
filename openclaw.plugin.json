@@ -102,6 +102,47 @@
         "default": true,
         "description": "是否在路由失败时输出错误日志"
       },
+      "routeCacheTtlSeconds": {
+        "type": "integer",
+        "default": 300,
+        "minimum": 0,
+        "maximum": 3600,
+        "description": "路由结果缓存时间（秒），0 表示禁用缓存"
+      },
+      "extraToolPacks": {
+        "type": "array",
+        "default": [],
+        "description": "用户自定义工具包，格式：[{\"name\":\"工具名\",\"description\":\"描述\"}]",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "description": { "type": "string" }
+          },
+          "required": ["name", "description"]
+        }
+      },
+      "extraFiles": {
+        "type": "array",
+        "default": [],
+        "description": "用户自定义工作区文件，格式：[{\"name\":\"文件名\",\"description\":\"描述\"}]",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "description": { "type": "string" }
+          },
+          "required": ["name", "description"]
+        }
+      },
+      "routingPromptTemplate": {
+        "type": "object",
+        "description": "自定义路由 Prompt 模板",
+        "properties": {
+          "system": { "type": "string", "description": "系统提示词" },
+          "user": { "type": "string", "description": "用户提示词模板，支持 {{userMessage}}, {{timelineSection}}, {{packIndex}}, {{fileIndex}} 变量" }
+        }
+      },
       "summaryModel": {
         "type": "string"
       },
